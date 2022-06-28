@@ -61,139 +61,147 @@ def select_action_multinormaldist(mean, variance):
     action = prob_dist.sample()
     return action, prob_dist
 
-def update_net(log_prob, log_prob_new, values, returns, advantage, ac, tb, global_step):
-     #Calculate loss function for actor network
-    r = torch.exp(log_prob_new - log_prob).squeeze()
-    # Loss negated as we want SGD
-    l1 = advantage*r
-    l2 = torch.clamp(r,1-epsilon, 1+epsilon)*advantage
-    actor_loss = -torch.min(l1, l2).mean()
-    
-    #Critic loss
-    critic_scale = 0.5
-    critic_loss = critic_scale*torch.pow(values-returns,2).mean()
-    
-    tot_loss = actor_loss + critic_loss
-    
-    optimizer.zero_grad()
-    tot_loss.mean().backward()
-    nn.utils.clip_grad_norm_(ac.parameters(), 1.0)
-    optimizer.step()
+class PPO():
+    def __init__(self):
+        #Load task/env specific config
+        env = "Cartpole"
+        with open("cfg/"+env+".yaml", 'r') as stream:
+            try:
+                cfg=yaml.safe_load(stream)
+                print(cfg)
+            except yaml.YAMLError as exc:
+                print(exc)
+        
+        self.vecenv = Cartpole(cfg, cfg["sim_device"], cfg["graphics_device_id"], 0)
 
-    tb.add_scalar("Loss/total", tot_loss, global_step)
-    tb.add_scalar("Loss/Actor", actor_loss, global_step)
-    tb.add_scalar("Loss/Critic", critic_loss, global_step)
+        self.num_obs = vecenv.cfg["env"]["numObservations"]
+        self.num_actions = vecenv.cfg["env"]["numActions"]
+        self.num_envs = cfg["env"]["numEnvs"]
+        self.device = cfg["rl_device"]
+
+        #Hyperparams
+
+        # Samples collected in total is num_envs*rollout_steps. minibatch_size should be a an integer factor of rollout_steps
+        self.rollout_steps = 100
+        self.minibatch_size = 25
+
+        self.num_epoch = 3
+        self.l_rate = 1e-4 
+        self.gamma = 0.99 #Reward discount factor
+        self.lambda_ = 0.95 #GAE tuner
+        self.epsilon = 0.3 #Clip epsilon
+
+        self.ac = ActorCritic(num_obs,num_actions).to(device)
+        self.optimizer = torch.optim.Adam(ac.parameters(), lr=l_rate)
+
+        self.tb = SummaryWriter()
+
+        #Allocate our buffers containing rollout_steps amount of data similar to isaacgymenvs vecenv output
+        self.obs_buf = torch.zeros((self.rollout_steps, self.num_envs, self.num_obs), device=self.device, dtype=torch.float)
+        self.reward_buf = torch.zeros((self.rollout_steps, self.num_envs), device = self.device, dtype=torch.float)
+        self.reset_buf = torch.ones((self.rollout_steps+1, self.num_envs), device=self.device, dtype=torch.long)
+        #We need rollout_step+1 values for advantage estimation
+        self.value_buf = torch.zeros((self.rollout_steps+1, self.num_envs), device=self.device, dtype=torch.float)
+        self.action_buf = torch.zeros((self.rollout_steps, self.num_envs, self.num_actions), device=self.device, dtype=torch.float)
+        self.log_prob_buf = torch.zeros((self.rollout_steps, self.num_envs,self.num_actions), device=self.device, dtype=torch.float)
+
+        #Buffers for last operation
+        self.next_obs_buf = torch.zeros((self.num_envs, self.num_obs), device=self.device, dtype=torch.float)
+        self.next_reset_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
+        
+
+    def run(self):
+
+        #Get first observation
+        obs_dict = self.vecenv.reset()
+        self.next_obs_buf = obs_dict["obs"]
+        
+        score = 0
+        self.global_step = 0
+        while(True):
+            
+            #Collect rollout
+            for step in range(self.rollout_steps):
+                self.obs_buf[step] = self.next_obs_buf
+                self.reset_buf[step] = self.next_reset_buf
+                #Only inference, no grad needed
+                with torch.no_grad():
+                    self.value_buf[step] = self.ac.critic(self.next_obs_buf).squeeze()
+                    action, prob_dist = select_action_normaldist(self.ac.actor(self.next_obs_buf), self.ac.actor_variance)
+                self.log_prob_buf[step] = prob_dist.log_prob(action)
+                self.next_obs_dict, self.reward_buf[step], self.next_reset_buf, _ = self.vecenv.step(action)
+                self.action_buf[step] = action
+                self.next_obs_buf = obs_dict["obs"]
+
+                #Calculate score
+                score += self.reward_buf[step].mean()
+
+                #Do average reward over 100 timesteps
+                if self.global_step % 100 == 0 and self.global_step != 0:
+                    self.tb.add_scalar("Score/timestep", score, self.global_step)
+                    score = 0
+                self.global_step+=1
+            
+            #Calculate generalized advantage estimate, looping backwards
+            with torch.no_grad():
+                self.value_buf[self.rollout_steps] = self.ac.critic(self.next_obs_buf).squeeze()
+            self.reset_buf[self.rollout_steps] = self.next_reset_buf
+            gae_buf = torch.zeros((self.rollout_steps, self.num_envs), device=self.device, dtype=torch.float)
+            gae_next = 0
+            for step in range(self.rollout_steps-1, -1, -1):
+                delta = self.reward_buf[step] + self.gamma * self.value_buf[step+1] * self.reset_buf[step+1] - self.value_buf[step]
+                gae_buf[step] =  delta + self.gamma * self.lambda_ * gae_next * self.reset_buf[step+1]
+                gae_next = gae_buf[step]
+            #Value buf is one element longer than gae_buf, we have bootstrapped next_value
+            return_buf = gae_buf + self.value_buf[0:self.rollout_steps]
+
+            #Update network
+            shuffled_indicies = np.arange(self.rollout_steps)
+            for k in range(self.num_epoch):
+                    np.random.shuffle(shuffled_indicies)
+                    for mb in range(self.rollout_steps//self.minibatch_size):
+                        minibatch_indicies = shuffled_indicies[mb*self.minibatch_size:(mb+1)*self.minibatch_size]
+                        actions, prob_dists = select_action_normaldist(self.ac.actor(self.obs_buf[minibatch_indicies]), self.ac.actor_variance)
+                        log_probs_new = prob_dists.log_prob(actions)
+                        
+
+
+                        values = self.ac.critic(self.obs_buf[minibatch_indicies]).squeeze()
+                        log_prob = self.log_prob_buf[minibatch_indicies]
+                        returns = return_buf[minibatch_indicies]
+                        advantage = gae_buf[minibatch_indicies]
+                        self.update_net(log_prob, log_probs_new, values, returns, advantage, ac, tb, global_step)
+                    
+            
+
+            self.ac.actor_variance *= 0.9
+
+            print("Timestep" + str(self.global_step) + ": Score: " + str(score.data) + ", Action Variance: " + str(self.ac.actor_variance.data.mean()))
+            tb.add_scalar("Advantage", gae_buf.mean(), self.global_step)
+
+    def update_net(self, log_prob, log_prob_new, values, returns, advantage, ac, tb, global_step):
+        #Calculate loss function for actor network
+        r = torch.exp(log_prob_new - log_prob).squeeze()
+        # Loss negated as we want SGD
+        l1 = advantage*r
+        l2 = torch.clamp(r,1-self.epsilon, 1+self.epsilon)*advantage
+        actor_loss = -torch.min(l1, l2).mean()
+        
+        #Critic loss
+        critic_scale = 0.5
+        critic_loss = critic_scale*torch.pow(values-returns,2).mean()
+        
+        tot_loss = actor_loss + critic_loss
+        
+        self.optimizer.zero_grad()
+        tot_loss.mean().backward()
+        nn.utils.clip_grad_norm_(ac.parameters(), 1.0)
+        self.optimizer.step()
+
+        self.tb.add_scalar("Loss/total", tot_loss, global_step)
+        self.tb.add_scalar("Loss/Actor", actor_loss, global_step)
+        self.tb.add_scalar("Loss/Critic", critic_loss, global_step)
 
 if __name__ == "__main__":
-    #Load task/env specific config
-    env = "Cartpole"
-    with open("cfg/"+env+".yaml", 'r') as stream:
-        try:
-            cfg=yaml.safe_load(stream)
-            print(cfg)
-        except yaml.YAMLError as exc:
-            print(exc)
-    
-    vecenv = Cartpole(cfg, cfg["sim_device"], cfg["graphics_device_id"], 0)
-
-    num_obs = vecenv.cfg["env"]["numObservations"]
-    num_actions = vecenv.cfg["env"]["numActions"]
-    num_envs = cfg["env"]["numEnvs"]
-    device = cfg["rl_device"]
-
-    #Hyperparams
-
-    # Samples collected in total is num_envs*rollout_steps. minibatch_size should be a an integer factor of rollout_steps
-    rollout_steps = 100
-    minibatch_size = 25
-
-    num_epoch = 3
-    l_rate = 1e-4 
-    gamma = 0.99 #Reward discount factor
-    lambda_ = 0.95 #GAE tuner
-    epsilon = 0.3 #Clip epsilon
-
-    ac = ActorCritic(num_obs,num_actions).to(device)
-    optimizer = torch.optim.Adam(ac.parameters(), lr=l_rate)
-
-    tb = SummaryWriter()
-
-    #Allocate our buffers containing rollout_steps amount of data similar to isaacgymenvs vecenv output
-    obs_buf = torch.zeros((rollout_steps, num_envs,num_obs), device=device, dtype=torch.float)
-    reward_buf = torch.zeros((rollout_steps, num_envs), device=device, dtype=torch.float)
-    reset_buf = torch.ones((rollout_steps+1, num_envs), device=device, dtype=torch.long)
-    #We need rollout_step+1 values for advantage estimation
-    value_buf = torch.zeros((rollout_steps+1, num_envs), device=device, dtype=torch.float)
-    action_buf = torch.zeros((rollout_steps, num_envs,num_actions), device=device, dtype=torch.float)
-    log_prob_buf = torch.zeros((rollout_steps, num_envs,num_actions), device=device, dtype=torch.float)
-    #return_buf = torch.zeros((rollout_steps, num_envs), device=device, dtype=torch.float)
-    #Buffers for last operation
-    next_obs_buf = torch.zeros((num_envs, num_obs), device=device, dtype=torch.float)
-    next_reset_buf = torch.ones(num_envs, device=device, dtype=torch.long)
-    
-    #Get first observation
-    obs_dict = vecenv.reset()
-    next_obs_buf = obs_dict["obs"]
-
-    score = 0
-    global_step = 0
-    while(True):
-        
-        #Collect rollout
-        for step in range(rollout_steps):
-            obs_buf[step] = next_obs_buf
-            reset_buf[step] = next_reset_buf
-            #Only inference, no grad needed
-            with torch.no_grad():
-                value_buf[step] = ac.critic(next_obs_buf).squeeze()
-                action, prob_dist = select_action_normaldist(ac.actor(next_obs_buf), ac.actor_variance)
-            log_prob_buf[step] = prob_dist.log_prob(action)
-            next_obs_dict, reward_buf[step], next_reset_buf, _ = vecenv.step(action)
-            action_buf[step] = action
-            next_obs_buf = obs_dict["obs"]
-
-            #Calculate score
-            score += reward_buf[step].mean()
-            #cumulative_reward = score[reset_buf[step].nonzero()].mean()
-            #if(not torch.isnan(cumulative_reward)):
-            #    tb.add_scalar("Score/timestep", cumulative_reward, global_step)
-            if global_step % 100 == 0 and global_step != 0:
-                tb.add_scalar("Score/timestep", score, global_step)
-                score = 0
-            global_step+=1
-        
-        #Calculate generalized advantage estimate, looping backwards
-        with torch.no_grad():
-            value_buf[rollout_steps] = ac.critic(next_obs_buf).squeeze()
-        reset_buf[rollout_steps] = next_reset_buf
-        gae_buf = torch.zeros((rollout_steps, num_envs), device=device, dtype=torch.float)
-        gae_next = 0
-        for step in range(rollout_steps-1, -1, -1):
-            delta = reward_buf[step] + gamma * value_buf[step+1] * reset_buf[step+1] - value_buf[step]
-            gae_buf[step] =  delta + gamma * lambda_ * gae_next *reset_buf[step+1]
-            gae_next = gae_buf[step]
-        return_buf = gae_buf + value_buf[0:rollout_steps]
-
-        #Update network
-        shuffled_indicies = np.arange(rollout_steps)
-        for k in range(num_epoch):
-                np.random.shuffle(shuffled_indicies)
-                for mb in range(rollout_steps//minibatch_size):
-                    minibatch_indicies = shuffled_indicies[mb*minibatch_size:(mb+1)*minibatch_size]
-                    actions, prob_dists = select_action_normaldist(ac.actor(obs_buf[minibatch_indicies]), ac.actor_variance)
-                    log_probs_new = prob_dists.log_prob(actions)
-                    
-
-
-                    values = ac.critic(obs_buf[minibatch_indicies]).squeeze()
-                    log_prob = log_prob_buf[minibatch_indicies]
-                    returns = return_buf[minibatch_indicies]
-                    advantage = gae_buf[minibatch_indicies]
-                    update_net(log_prob, log_probs_new, values, returns, advantage, ac, tb, global_step)
-                
-        
-
-        ac.actor_variance *= 0.9
-
-        print("Timestep" + str(global_step) + ": Score: " + str(score.data) + ", Action Variance: " + str(ac.actor_variance.data.mean()))
-        tb.add_scalar("Advantage", gae_buf.mean(), global_step)
+    learner = PPO()
+    learner.run()

@@ -6,7 +6,6 @@ import os
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
@@ -25,11 +24,11 @@ class ActorCritic(nn.Module):
         super(ActorCritic, self).__init__()
         #Outputs mean value of action
         self.actor = nn.Sequential(
-            nn.Linear(n_obs, 256),
+            nn.Linear(n_obs, 64),
             nn.Tanh(),
-            nn.Linear(256, 256),
+            nn.Linear(64, 64),
             nn.Tanh(),
-            nn.Linear(256, n_actions)
+            nn.Linear(64, n_actions)
         )
         self.actor.apply(orthogonal_init)
         #We want the variance elements to be trainable, assuming no cross correlation
@@ -37,11 +36,11 @@ class ActorCritic(nn.Module):
         
         #Outputs value function
         self.critic = nn.Sequential(
-            nn.Linear(n_obs, 256),
+            nn.Linear(n_obs, 64),
             nn.Tanh(),
-            nn.Linear(256,256),
+            nn.Linear(64,64),
             nn.Tanh(),
-            nn.Linear(256, 1)
+            nn.Linear(64, 1)
         )
         self.critic.apply(orthogonal_init)
 
@@ -70,7 +69,7 @@ def select_action_multinormaldist(mean, variance, num_envs):
 class PPO():
     def __init__(self):
         #Load task/env specific config
-        env = "Ant"
+        env = "Cartpole"
         with open("cfg/"+env+".yaml", 'r') as stream:
             try:
                 cfg=yaml.safe_load(stream)
@@ -88,7 +87,7 @@ class PPO():
         #Hyperparams
 
         # Samples collected in total is num_envs*rollout_steps. minibatch_size should be a an integer factor of rollout_steps
-        self.rollout_steps = 50
+        self.rollout_steps = 200
         self.minibatch_size = 10
 
         self.num_epoch = 5
@@ -154,7 +153,7 @@ class PPO():
             self.reset_buf[self.rollout_steps] = self.next_reset_buf
             gae_buf = torch.zeros((self.rollout_steps, self.num_envs), device=self.device, dtype=torch.float)
             gae_next = 0
-            for step in range(self.rollout_steps-1, -1, -1):
+            for step in reversed(range(self.rollout_steps)):
                 delta = self.reward_buf[step] + self.gamma * self.value_buf[step+1] * self.reset_buf[step+1] - self.value_buf[step]
                 gae_buf[step] =  delta + self.gamma * self.lambda_ * gae_next * self.reset_buf[step+1]
                 gae_next = gae_buf[step]
@@ -197,11 +196,12 @@ class PPO():
         critic_scale = 0.5
         critic_loss = critic_scale*torch.pow(values-returns,2).mean()
         
+        critic_loss = F.smooth_l1_loss(values, returns)
         tot_loss = actor_loss + critic_loss
         
         self.optimizer.zero_grad()
         tot_loss.mean().backward()
-        nn.utils.clip_grad_norm_(self.ac.parameters(), 0.5)
+        #nn.utils.clip_grad_norm_(self.ac.parameters(), 0.5)
         self.optimizer.step()
 
         self.tb.add_scalar("Loss/total", tot_loss, self.global_step)

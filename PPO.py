@@ -2,6 +2,7 @@
 import yaml
 import isaacgym
 
+from pathlib import Path
 import os
 
 import torch
@@ -79,7 +80,8 @@ class PPO():
                 print(exc)
         
         self.run_name = run_name
-        os.mkdir("runs/" + self.run_name)
+        Path("runs/" + self.run_name).mkdir(parents=True, exist_ok=True)
+        #os.mkdir("runs/" + self.run_name)
 
         #self.vecenv = Cartpole(cfg, cfg["sim_device"], cfg["graphics_device_id"], 0)
         self.vecenv = isaacgym_task_map[env_cfg["name"]](env_cfg, env_cfg["rl_device"], env_cfg["sim_device"], env_cfg["graphics_device_id"], 0, 0, 1)
@@ -100,6 +102,8 @@ class PPO():
         self.gamma = train_cfg["gamma"] #Reward discount factor
         self.lambda_ = train_cfg["lambda"] #GAE tuner
         self.epsilon = train_cfg["epsilon_clip"] #Clip epsilon
+
+        self.eval_freq = 2
 
         self.ac = ActorCritic(self.num_obs, self.num_actions, self.device).to(self.device)
         self.optimizer = torch.optim.Adam(self.ac.parameters(), lr=self.l_rate)
@@ -129,6 +133,7 @@ class PPO():
         score = 0
         best_score = 0
         self.global_step = 0
+        self.update_step = 0
         while(True):
             
             #Collect rollout
@@ -148,23 +153,11 @@ class PPO():
                 self.next_reset_buf = next_reset.clone()
                 self.action_buf[step] = action
 
-                #Calculate score
+                #Accumulate non adjusted score
                 score += self.reward_buf[step].mean()
 
                 #Do average reward over timesteps
-                if self.global_step % 100 == 0 and self.global_step != 0:
-                    print(self.global_step % 100)
-                    print("Timestep " + str(self.global_step) + ": Score: " + str(score.data) + ", Action Variance: " + str(self.ac.actor_variance.data.mean()))
-                    
-                    self.tb.add_scalar("Score/timestep", score, self.global_step)
-                    if score > best_score:
-                        best_score = score
-                        torch.save(self.ac.state_dict(), "runs/" + self.run_name + "/best_weigth_" + score)
-
-                    
-        
-
-                    score = 0
+                #if self.global_step % 100 == 0 and self.global_step != 0:
                 self.global_step+=1
             
             #Calculate generalized advantage estimate, looping backwards
@@ -200,6 +193,16 @@ class PPO():
             #End of update tasks
             self.ac.actor_variance *= 0.9
             self.tb.add_scalar("Advantage", gae_buf.mean(), self.global_step)
+            
+            if self.update_step % self.eval_freq == 0:
+                print("Timestep " + str(self.global_step) + ": Score: " + str(score.data) + ", Action Variance: " + str(self.ac.actor_variance.data.mean()))
+                    
+                self.tb.add_scalar("Score/timestep", score, self.global_step)
+                if score > best_score:
+                    best_score = score
+                    torch.save(self.ac.state_dict(), "runs/" + self.run_name + "/best_weigth_" + str(score))
+                score = 0
+            self.update_step += 1
 
     def update_net(self, log_prob, log_prob_new, values, returns, advantage):
         #Calculate loss function for actor network

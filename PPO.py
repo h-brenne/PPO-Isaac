@@ -2,7 +2,7 @@
 import yaml
 import isaacgym
 
-#import os
+import os
 
 import torch
 import torch.nn as nn
@@ -47,14 +47,6 @@ class ActorCritic(nn.Module):
             nn.Linear(100, 1)
         )
         #self.critic.apply(orthogonal_init)
-
-    def select_action_logprob(self, state):
-            mean = self.get_action_mean(state)
-            #covariance = torch.diag(self.actor_diag_covariance)
-            prob_dist = torch.distributions.Normal(mean, self.actor_variance)
-            action = prob_dist.sample()
-            log_prob = prob_dist.log_prob(action)
-            return action, log_prob
     
         
 def select_action_normaldist(mean, variance, num_envs):
@@ -71,35 +63,43 @@ def select_action_multinormaldist(mean, variance):
     return action, prob_dist
 
 class PPO():
-    def __init__(self):
-        #Load task/env specific config
-        env = "Humanoid"
-        with open("cfg/"+env+".yaml", 'r') as stream:
+    def __init__(self, env_cfg_file, train_cfg_file, run_name):
+        #Load task/env and training/algo specific config
+        with open(env_cfg_file, 'r') as stream:
             try:
-                cfg=yaml.safe_load(stream)
-                print(cfg)
+                env_cfg=yaml.safe_load(stream)
+                print(env_cfg)
+            except yaml.YAMLError as exc:
+                print(exc)
+        with open(train_cfg_file, 'r') as stream:
+            try:
+                train_cfg=yaml.safe_load(stream)
+                print(train_cfg)
             except yaml.YAMLError as exc:
                 print(exc)
         
+        self.run_name = run_name
+        os.mkdir("runs/" + self.run_name)
+
         #self.vecenv = Cartpole(cfg, cfg["sim_device"], cfg["graphics_device_id"], 0)
-        self.vecenv = isaacgym_task_map[env](cfg, cfg["rl_device"], cfg["sim_device"], cfg["graphics_device_id"], 0, 0, 1)
+        self.vecenv = isaacgym_task_map[env_cfg["name"]](env_cfg, env_cfg["rl_device"], env_cfg["sim_device"], env_cfg["graphics_device_id"], 0, 0, 1)
         self.num_obs = self.vecenv.cfg["env"]["numObservations"]
         self.num_actions = self.vecenv.cfg["env"]["numActions"]
-        self.num_envs = cfg["env"]["numEnvs"]
-        self.device = cfg["rl_device"]
+        self.num_envs = env_cfg["env"]["numEnvs"]
+        self.device = env_cfg["rl_device"]
 
         #Hyperparams
 
         # Samples collected in total is num_envs*rollout_steps. minibatch_size should be a an integer factor of rollout_steps
-        self.rollout_steps = 32
-        self.minibatch_size = 8
+        self.rollout_steps = train_cfg["rollout_steps"]
+        self.minibatch_size = train_cfg["minibatch_size"]
         print("Minibatch samples: ", self.minibatch_size*self.num_envs)
 
-        self.num_epoch = 5
-        self.l_rate = 3e-4 
-        self.gamma = 0.99 #Reward discount factor
-        self.lambda_ = 0.95 #GAE tuner
-        self.epsilon = 0.2 #Clip epsilon
+        self.num_epoch = train_cfg["num_epoch"]
+        self.l_rate = train_cfg["learning_rate"]
+        self.gamma = train_cfg["gamma"] #Reward discount factor
+        self.lambda_ = train_cfg["lambda"] #GAE tuner
+        self.epsilon = train_cfg["epsilon_clip"] #Clip epsilon
 
         self.ac = ActorCritic(self.num_obs, self.num_actions, self.device).to(self.device)
         self.optimizer = torch.optim.Adam(self.ac.parameters(), lr=self.l_rate)
@@ -127,6 +127,7 @@ class PPO():
         self.next_obs_buf = obs_dict["obs"].clone()
            
         score = 0
+        best_score = 0
         self.global_step = 0
         while(True):
             
@@ -150,9 +151,19 @@ class PPO():
                 #Calculate score
                 score += self.reward_buf[step].mean()
 
-                #Do average reward over 100 timesteps
+                #Do average reward over timesteps
                 if self.global_step % 100 == 0 and self.global_step != 0:
+                    print(self.global_step % 100)
+                    print("Timestep " + str(self.global_step) + ": Score: " + str(score.data) + ", Action Variance: " + str(self.ac.actor_variance.data.mean()))
+                    
                     self.tb.add_scalar("Score/timestep", score, self.global_step)
+                    if score > best_score:
+                        best_score = score
+                        torch.save(self.ac.state_dict(), "runs/" + self.run_name + "/best_weigth_" + score)
+
+                    
+        
+
                     score = 0
                 self.global_step+=1
             
@@ -186,10 +197,8 @@ class PPO():
                         self.update_net(log_prob, log_probs_new, values, returns, advantage)
                     
             
-
-            self.ac.actor_variance *= 0.999
-
-            print("Timestep" + str(self.global_step) + ": Score: " + str(score.data) + ", Action Variance: " + str(self.ac.actor_variance.data.mean()))
+            #End of update tasks
+            self.ac.actor_variance *= 0.9
             self.tb.add_scalar("Advantage", gae_buf.mean(), self.global_step)
 
     def update_net(self, log_prob, log_prob_new, values, returns, advantage):
@@ -203,8 +212,7 @@ class PPO():
         #Critic loss
         critic_scale = 0.5
         critic_loss = critic_scale*torch.pow(values-returns,2).mean()
-        
-        #critic_loss = F.smooth_l1_loss(values, returns)
+
         tot_loss = actor_loss + critic_loss
         
         self.optimizer.zero_grad()
@@ -217,5 +225,5 @@ class PPO():
         self.tb.add_scalar("Loss/Critic", critic_loss, self.global_step)
 
 if __name__ == "__main__":
-    learner = PPO()
+    learner = PPO("cfg/env/Cartpole.yaml", "cfg/algo/Cartpole_train.yaml", "test")
     learner.run()

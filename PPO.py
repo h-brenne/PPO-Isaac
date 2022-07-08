@@ -104,6 +104,8 @@ class PPO():
         self.epsilon = train_cfg["epsilon_clip"] #Clip epsilon
 
         self.eval_freq = 2
+        
+        self.time_per_update = env_cfg["sim"]["dt"]*self.rollout_steps #rollout Sim time before each NN update
 
         self.ac = ActorCritic(self.num_obs, self.num_actions, self.device).to(self.device)
         self.optimizer = torch.optim.Adam(self.ac.parameters(), lr=self.l_rate)
@@ -195,12 +197,14 @@ class PPO():
             self.tb.add_scalar("Advantage", gae_buf.mean(), self.global_step)
             
             if self.update_step % self.eval_freq == 0:
-                print("Timestep " + str(self.global_step) + ": Score: " + str(score.data) + ", Action Variance: " + str(self.ac.actor_variance.data.mean()))
+                #Calculate score per second
+                score = score/(self.time_per_update*self.eval_freq)
+                print("Timestep " + str(self.global_step) + ": Score: " + str(round(score.item())) + ", Action Variance: " + str(self.ac.actor_variance.data.mean()))
                     
-                self.tb.add_scalar("Score/timestep", score, self.global_step)
+                self.tb.add_scalar("Score/timestep", float(score), self.global_step)
                 if score > best_score:
                     best_score = score
-                    torch.save(self.ac.state_dict(), "runs/" + self.run_name + "/best_weigth_" + str(score))
+                    torch.save(self.ac.state_dict(), "runs/" + self.run_name + "/best_weigth_" + str(round(score.item())))
                 score = 0
             self.update_step += 1
 
@@ -228,5 +232,5 @@ class PPO():
         self.tb.add_scalar("Loss/Critic", critic_loss, self.global_step)
 
 if __name__ == "__main__":
-    learner = PPO("cfg/env/Cartpole.yaml", "cfg/algo/Cartpole_train.yaml", "test")
+    learner = PPO("cfg/env/BallBalance.yaml", "cfg/algo/Cartpole_train.yaml", "BallBalance")
     learner.run()

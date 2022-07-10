@@ -1,0 +1,9 @@
+learning_rate: 3.0e-4
+gamma: 0.99
+lambda: 0.95 #tuning GAE
+epsilon_clip: 0.2
+num_epoch: 5
+
+numEnvs: 4096
+rollout_steps: 16
+minibatch_size: 8 #Needs to be a factor of rollout_steps

@@ -4,6 +4,8 @@ import isaacgym
 
 from pathlib import Path
 import os
+from datetime import datetime
+
 
 import torch
 import torch.nn as nn
@@ -64,7 +66,7 @@ def select_action_multinormaldist(mean, variance):
     return action, prob_dist
 
 class PPO():
-    def __init__(self, env_cfg_file, train_cfg_file, run_name):
+    def __init__(self, env_cfg_file, train_cfg_file, run_name = 'None', checkpoint = 'None'):
         #Load task/env and training/algo specific config
         with open(env_cfg_file, 'r') as stream:
             try:
@@ -79,11 +81,21 @@ class PPO():
             except yaml.YAMLError as exc:
                 print(exc)
         
-        self.run_name = run_name
-        Path("runs/" + self.run_name).mkdir(parents=True, exist_ok=True)
-        #os.mkdir("runs/" + self.run_name)
+        self.now = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        if run_name == 'None':
+            run_name = self.now
+        else:
+            run_name = run_name + "/" + self.now
 
-        #self.vecenv = Cartpole(cfg, cfg["sim_device"], cfg["graphics_device_id"], 0)
+        self.log_dir = "runs/" + env_cfg["name"] + "/" + run_name
+        Path(self.log_dir).mkdir(parents=True, exist_ok=True) #Create dir if it doesn't exist
+        
+        self.checkpoint = False
+        if(checkpoint != 'None'):
+            self.checkpoint = True
+
+        #Setup sim
+        env_cfg["env"]["numEnvs"] = train_cfg["numEnvs"]
         self.vecenv = isaacgym_task_map[env_cfg["name"]](env_cfg, env_cfg["rl_device"], env_cfg["sim_device"], env_cfg["graphics_device_id"], 0, 0, 1)
         self.num_obs = self.vecenv.cfg["env"]["numObservations"]
         self.num_actions = self.vecenv.cfg["env"]["numActions"]
@@ -110,7 +122,10 @@ class PPO():
         self.ac = ActorCritic(self.num_obs, self.num_actions, self.device).to(self.device)
         self.optimizer = torch.optim.Adam(self.ac.parameters(), lr=self.l_rate)
 
-        self.tb = SummaryWriter()
+        if(self.checkpoint):
+            self.ac.load_state_dict(torch.load(checkpoint))
+
+        self.tb = SummaryWriter(log_dir = self.log_dir)
 
         #Allocate our buffers containing rollout_steps amount of data similar to isaacgymenvs vecenv output
         self.obs_buf = torch.zeros((self.rollout_steps, self.num_envs, self.num_obs), device=self.device, dtype=torch.float)
@@ -176,24 +191,25 @@ class PPO():
             return_buf = gae_buf + self.value_buf[0:self.rollout_steps]
 
             #Update network
-            shuffled_indicies = np.arange(self.rollout_steps)
-            for k in range(self.num_epoch):
-                    np.random.shuffle(shuffled_indicies)
-                    for mb in range(self.rollout_steps//self.minibatch_size):
-                        minibatch_indicies = shuffled_indicies[mb*self.minibatch_size:(mb+1)*self.minibatch_size]
-                        _, prob_dists = select_action_multinormaldist(self.ac.actor(self.obs_buf[minibatch_indicies]), self.ac.actor_variance)
-                        
-                        log_probs_new = prob_dists.log_prob(self.action_buf[minibatch_indicies])
+            if(not self.checkpoint):
+                shuffled_indicies = np.arange(self.rollout_steps)
+                for k in range(self.num_epoch):
+                        np.random.shuffle(shuffled_indicies)
+                        for mb in range(self.rollout_steps//self.minibatch_size):
+                            minibatch_indicies = shuffled_indicies[mb*self.minibatch_size:(mb+1)*self.minibatch_size]
+                            _, prob_dists = select_action_multinormaldist(self.ac.actor(self.obs_buf[minibatch_indicies]), self.ac.actor_variance)
+                            
+                            log_probs_new = prob_dists.log_prob(self.action_buf[minibatch_indicies])
 
-                        values = self.ac.critic(self.obs_buf[minibatch_indicies]).squeeze()
-                        log_prob = self.log_prob_buf[minibatch_indicies]
-                        returns = return_buf[minibatch_indicies]
-                        advantage = gae_buf[minibatch_indicies]
-                        self.update_net(log_prob, log_probs_new, values, returns, advantage)
+                            values = self.ac.critic(self.obs_buf[minibatch_indicies]).squeeze()
+                            log_prob = self.log_prob_buf[minibatch_indicies]
+                            returns = return_buf[minibatch_indicies]
+                            advantage = gae_buf[minibatch_indicies]
+                            self.update_net(log_prob, log_probs_new, values, returns, advantage)
                     
             
             #End of update tasks
-            self.ac.actor_variance *= 0.9
+            self.ac.actor_variance *= 0.99
             self.tb.add_scalar("Advantage", gae_buf.mean(), self.global_step)
             
             if self.update_step % self.eval_freq == 0:
@@ -203,8 +219,9 @@ class PPO():
                     
                 self.tb.add_scalar("Score/timestep", float(score), self.global_step)
                 if score > best_score:
+                    print("Saving checkpoint ")
                     best_score = score
-                    torch.save(self.ac.state_dict(), "runs/" + self.run_name + "/best_weigth_" + str(round(score.item())))
+                    torch.save(self.ac.state_dict(), self.log_dir + "/best_weigth")
                 score = 0
             self.update_step += 1
 
@@ -232,5 +249,5 @@ class PPO():
         self.tb.add_scalar("Loss/Critic", critic_loss, self.global_step)
 
 if __name__ == "__main__":
-    learner = PPO("cfg/env/BallBalance.yaml", "cfg/algo/Cartpole_train.yaml", "BallBalance")
+    learner = PPO(env_cfg_file = "cfg/env/BallBalance.yaml", train_cfg_file = "cfg/algo/BallBalance_train.yaml", checkpoint="runs/BallBalance/2022-07-10_14:46:24/best_weigth")
     learner.run()

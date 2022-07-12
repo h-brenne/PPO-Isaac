@@ -23,39 +23,32 @@ def orthogonal_init(layer):
     
 class ActorCritic(nn.Module):
 
-    def __init__(self, n_obs, n_actions, device):
+    def __init__(self, layer_array, n_obs, n_actions, device):
         super(ActorCritic, self).__init__()
         #Outputs mean value of action
-        self.actor = nn.Sequential(
-            nn.Linear(n_obs, 400),
-            nn.Tanh(),
-            nn.Linear(400, 200),
-            nn.Tanh(),
-            nn.Linear(200,100),
-            nn.Tanh(),
-            nn.Linear(100, n_actions)
-        )
+        self.actor = nn.Sequential(*self.create_net(layer_array, n_obs, n_actions))
         #self.actor.apply(orthogonal_init)
+
         #We want the variance elements to be trainable, assuming no cross correlation
         self.actor_variance = torch.full((n_actions,), 0.3, device=device)
         
         #Outputs value function
-        self.critic = nn.Sequential(
-            nn.Linear(n_obs, 400),
-            nn.Tanh(),
-            nn.Linear(400, 200),
-            nn.Tanh(),
-            nn.Linear(200,100),
-            nn.Tanh(),
-            nn.Linear(100, 1)
-        )
+        self.critic = nn.Sequential(*self.create_net(layer_array, n_obs, 1))
         #self.critic.apply(orthogonal_init)
-    
+
+    def create_net(self, layer_array, input_size, output_size):
+        layers = []
+        layers.append(nn.Linear(input_size, layer_array[0]))
+        layers.append(nn.Tanh())
+        for i in range(len(layer_array)-1):
+            layers.append(nn.Linear(layer_array[i], layer_array[i+1]))
+            layers.append(nn.Tanh())
+        layers.append(nn.Linear(layer_array[-1], output_size))
+        return layers
         
-def select_action_normaldist(mean, variance, num_envs):
+def select_action_normaldist(mean, variance):
     prob_dist = torch.distributions.Normal(mean, variance)
     action = prob_dist.sample()
-    print("Action: ", action.shape)
     return action, prob_dist
 def select_action_multinormaldist(mean, variance):
     #Torch infers the batch_shape from covariance shape
@@ -115,11 +108,11 @@ class PPO():
         self.lambda_ = train_cfg["lambda"] #GAE tuner
         self.epsilon = train_cfg["epsilon_clip"] #Clip epsilon
 
-        self.eval_freq = 2
+        self.eval_freq = train_cfg["eval_freq"]
         
         self.time_per_update = env_cfg["sim"]["dt"]*self.rollout_steps #rollout Sim time before each NN update
 
-        self.ac = ActorCritic(self.num_obs, self.num_actions, self.device).to(self.device)
+        self.ac = ActorCritic(train_cfg["nn_layer_connections"], self.num_obs, self.num_actions, self.device).to(self.device)
         self.optimizer = torch.optim.Adam(self.ac.parameters(), lr=self.l_rate)
 
         if(self.checkpoint):
@@ -164,17 +157,14 @@ class PPO():
                 self.log_prob_buf[step] = prob_dist.log_prob(action)
                 next_obs_dict, reward, next_reset, _ = self.vecenv.step(action)
                 
-                #Clone tensors, otherwise the value will change.
-                self.next_obs_buf = next_obs_dict["obs"].clone()
-                self.reward_buf[step] = reward.clone()
-                self.next_reset_buf = next_reset.clone()
+                self.next_obs_buf = next_obs_dict["obs"]
+                self.reward_buf[step] = reward
+                self.next_reset_buf = next_reset
                 self.action_buf[step] = action
 
                 #Accumulate non adjusted score
                 score += self.reward_buf[step].mean()
-
-                #Do average reward over timesteps
-                #if self.global_step % 100 == 0 and self.global_step != 0:
+                
                 self.global_step+=1
             
             #Calculate generalized advantage estimate, looping backwards
@@ -249,5 +239,5 @@ class PPO():
         self.tb.add_scalar("Loss/Critic", critic_loss, self.global_step)
 
 if __name__ == "__main__":
-    learner = PPO(env_cfg_file = "cfg/env/BallBalance.yaml", train_cfg_file = "cfg/algo/BallBalance_train.yaml", checkpoint="runs/BallBalance/2022-07-10_14:46:24/best_weigth")
+    learner = PPO(env_cfg_file = "cfg/env/BallBalance.yaml", train_cfg_file = "cfg/algo/BallBalance_train.yaml")
     learner.run()

@@ -3,6 +3,9 @@ gamma: 0.99
 lambda: 0.95 #tuning GAE
 epsilon_clip: 0.2
 num_epoch: 5
+eval_freq: 4
 
+numEnvs: 4096
 rollout_steps: 32
 minibatch_size: 8 #Needs to be a factor of rollout_steps
+nn_layer_connections: [400,200,100]

@@ -155,8 +155,12 @@ class PPO():
         #Get first observation
         obs_dict = self.vecenv.reset()
         self.next_obs_buf = obs_dict["obs"].clone()
-           
-        score = 0
+        
+        reward_sum_buf = torch.zeros((self.num_envs), device = self.device, dtype=torch.float)
+        reward_sum = 0
+        episode_reward_sum = 0
+        mean_ep_reward = 0
+        finished_episodes = 0
         best_score = 0
         self.global_step = 0
         self.update_step = 0
@@ -178,8 +182,16 @@ class PPO():
                 self.next_reset_buf = next_reset
                 self.action_buf[step] = action
 
-                #Accumulate non adjusted score
-                score += self.reward_buf[step].mean()
+                #Accumulate non time-adjusted score
+                reward_sum += reward.mean()
+                
+                #Calculate mean episode reward
+                reward_sum_buf += reward
+                r_finished = torch.masked_select(reward_sum_buf, next_reset.bool())
+                finished_episodes += len(r_finished)
+                if len(r_finished) > 0:
+                    episode_reward_sum += r_finished.sum()
+                reward_sum_buf *= 1-next_reset
 
                 self.global_step+=1
             
@@ -204,7 +216,6 @@ class PPO():
                         for mb in range(self.rollout_steps//self.minibatch_size):
                             minibatch_indicies = shuffled_indicies[mb*self.minibatch_size:(mb+1)*self.minibatch_size]
                             _, prob_dists = select_action_multinormaldist(self.ac.actor(self.obs_buf[minibatch_indicies]), self.ac.actor_variance)
-                            
                             log_probs_new = prob_dists.log_prob(self.action_buf[minibatch_indicies])
 
                             values = self.ac.critic(self.obs_buf[minibatch_indicies]).squeeze()
@@ -218,17 +229,26 @@ class PPO():
             self.ac.actor_variance *= self.action_lambda
             self.tb.add_scalar("Advantage", gae_buf.mean(), self.global_step)
             
+            #Get mean episode reward
+            if len(r_finished) > 0:
+                mean_ep_reward = episode_reward_sum/finished_episodes
+            self.tb.add_scalar("Score/episode_reward", float(mean_ep_reward), self.global_step)
+            finished_episodes = 0
+            episode_reward_sum = 0
+
+            #Calculate score per second
+            reward_time_average = reward_sum/(self.time_per_update*self.eval_freq)
+            self.tb.add_scalar("Score/time_average_reward", float(reward_time_average), self.global_step)
+            reward_sum = 0
+
             if self.update_step % self.eval_freq == 0:
-                #Calculate score per second
-                score = score/(self.time_per_update*self.eval_freq)
-                print("Timestep " + str(self.global_step) + ", Network updates:" + str(self.update_step) + ": Score: " + str(round(score.item(), 2)) + ", Action Variance: " + str(self.ac.actor_variance.data.mean().item()))
-                    
-                self.tb.add_scalar("Metric/Score", float(score), self.global_step)
+                score = mean_ep_reward
+                print(  "Timestep " + str(self.global_step) + ", Network updates:" + str(self.update_step) + ": Score: " + 
+                        str(round(score.item(), 2)) + ", Action Variance: " + str(round(self.ac.actor_variance.data.mean().item(), 2)))
                 if score > best_score:
                     print("Saving checkpoint ")
                     best_score = score
                     torch.save(self.ac.state_dict(), self.log_dir + "/" + self.now + "_best_weigth")
-                score = 0
             self.update_step += 1
         self.vecenv.gym.destroy_sim(self.vecenv.sim)
         del self.vecenv.gym

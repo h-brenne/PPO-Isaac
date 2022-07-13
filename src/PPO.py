@@ -250,8 +250,6 @@ class PPO():
                     best_score = score
                     torch.save(self.ac.state_dict(), self.log_dir + "/" + self.now + "_best_weigth")
             self.update_step += 1
-        self.vecenv.gym.destroy_sim(self.vecenv.sim)
-        del self.vecenv.gym
 
     def update_net(self, log_prob, log_prob_new, values, returns, advantage):
         #Calculate loss function for actor network

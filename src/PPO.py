@@ -80,7 +80,7 @@ class PPO():
         if run_name == 'None':
             run_name = self.now
         else:
-            run_name = run_name + "/" + self.now
+            run_name = run_name #+ "/" + self.now
 
         self.log_dir = "runs/" + env_cfg["name"] + "/" + run_name
         Path(self.log_dir).mkdir(parents=True, exist_ok=True) #Create dir if it doesn't exist
@@ -106,8 +106,6 @@ class PPO():
         self.device = env_cfg["rl_device"]
 
         self.total_updates = train_cfg["total_updates"]
-        
-        print("test2")
 
         #Hyperparams
         # Samples collected in total is num_envs*rollout_steps. minibatch_size should be a an integer factor of rollout_steps
@@ -136,7 +134,7 @@ class PPO():
         if(self.checkpoint):
             self.ac.load_state_dict(torch.load(checkpoint))
 
-        self.tb = SummaryWriter(log_dir = self.log_dir)
+        self.tb = SummaryWriter(log_dir = self.log_dir + "/tb")
 
         #Allocate our buffers containing rollout_steps amount of data similar to isaacgymenvs vecenv output
         self.obs_buf = torch.zeros((self.rollout_steps, self.num_envs, self.num_obs), device=self.device, dtype=torch.float)
@@ -229,7 +227,7 @@ class PPO():
                 if score > best_score:
                     print("Saving checkpoint ")
                     best_score = score
-                    torch.save(self.ac.state_dict(), self.log_dir + "/best_weigth")
+                    torch.save(self.ac.state_dict(), self.log_dir + "/" + self.now + "_best_weigth")
                 score = 0
             self.update_step += 1
         self.vecenv.gym.destroy_sim(self.vecenv.sim)

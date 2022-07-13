@@ -68,6 +68,6 @@ if __name__ == "__main__":
     
     print(df["name"])
 
-    plt.figure()
-    sns.lineplot(data=df, x="wall_time", y="value")
-    plt.show()
+    #plt.figure()
+    #sns.lineplot(data=df, x="wall_time", y="value")
+    #plt.show()

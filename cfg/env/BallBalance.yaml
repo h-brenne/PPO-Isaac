@@ -8,28 +8,8 @@ sim_device: 'cuda:0'
 # device to run RL
 rl_device: 'cuda:0'
 graphics_device_id: 0
-# if given, will override the device setting in gym. 
-
-# RLGames Arguments
-# test - if set, run policy in inference mode (requires setting checkpoint to load)
-test: False
-# used to set checkpoint path
-checkpoint: ''
-# set to True to use multi-gpu horovod training
-multi_gpu: False
-
-wandb_activate: False
-wandb_group: ''
-wandb_name: ${train.params.config.name}
-wandb_entity: ''
-wandb_project: 'isaacgymenvs'
-capture_video: False
-capture_video_freq: 1464
-capture_video_len: 100
 force_render: True
-
 headless: False
-
 
 env:
   numEnvs: 0

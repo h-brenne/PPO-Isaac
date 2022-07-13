@@ -19,22 +19,24 @@ from isaacgymenvs.tasks import isaacgym_task_map
 def orthogonal_init(layer):
     if isinstance(layer, nn.Linear):
         nn.init.orthogonal_(layer.weight)
-        layer.bias.data.fill_(0.0)
+        #layer.bias.data.fill_(0.0)
     
 class ActorCritic(nn.Module):
 
-    def __init__(self, layer_array, n_obs, n_actions, device):
+    def __init__(self, layer_array, n_obs, n_actions, orthogonal, init_variance, device):
         super(ActorCritic, self).__init__()
         #Outputs mean value of action
         self.actor = nn.Sequential(*self.create_net(layer_array, n_obs, n_actions))
-        #self.actor.apply(orthogonal_init)
+        
 
         #We want the variance elements to be trainable, assuming no cross correlation
-        self.actor_variance = torch.full((n_actions,), 0.3, device=device)
+        self.actor_variance = torch.full((n_actions,), init_variance, device=device)
         
         #Outputs value function
         self.critic = nn.Sequential(*self.create_net(layer_array, n_obs, 1))
-        #self.critic.apply(orthogonal_init)
+        if orthogonal:
+            self.actor.apply(orthogonal_init)
+            self.critic.apply(orthogonal_init)
 
     def create_net(self, layer_array, input_size, output_size):
         layers = []
@@ -89,14 +91,25 @@ class PPO():
 
         #Setup sim
         env_cfg["env"]["numEnvs"] = train_cfg["numEnvs"]
-        self.vecenv = isaacgym_task_map[env_cfg["name"]](env_cfg, env_cfg["rl_device"], env_cfg["sim_device"], env_cfg["graphics_device_id"], 0, 0, 1)
+
+        print("test")
+        self.vecenv = isaacgym_task_map[env_cfg["name"]](   env_cfg, 
+                                                            env_cfg["rl_device"], 
+                                                            env_cfg["sim_device"], 
+                                                            env_cfg["graphics_device_id"], 
+                                                            env_cfg["headless"], 
+                                                            0, 
+                                                            env_cfg["force_render"])
         self.num_obs = self.vecenv.cfg["env"]["numObservations"]
         self.num_actions = self.vecenv.cfg["env"]["numActions"]
         self.num_envs = env_cfg["env"]["numEnvs"]
         self.device = env_cfg["rl_device"]
 
-        #Hyperparams
+        self.total_updates = train_cfg["total_updates"]
+        
+        print("test2")
 
+        #Hyperparams
         # Samples collected in total is num_envs*rollout_steps. minibatch_size should be a an integer factor of rollout_steps
         self.rollout_steps = train_cfg["rollout_steps"]
         self.minibatch_size = train_cfg["minibatch_size"]
@@ -112,7 +125,12 @@ class PPO():
         
         self.time_per_update = env_cfg["sim"]["dt"]*self.rollout_steps #rollout Sim time before each NN update
 
-        self.ac = ActorCritic(train_cfg["nn_layer_connections"], self.num_obs, self.num_actions, self.device).to(self.device)
+        self.action_lambda = train_cfg["action_lambda"]
+        self.ac = ActorCritic(  train_cfg["nn_layer_connections"], 
+                                self.num_obs, self.num_actions, 
+                                train_cfg["orthonal_init"], 
+                                train_cfg["action_init_var"],
+                                self.device).to(self.device)
         self.optimizer = torch.optim.Adam(self.ac.parameters(), lr=self.l_rate)
 
         if(self.checkpoint):
@@ -144,7 +162,7 @@ class PPO():
         best_score = 0
         self.global_step = 0
         self.update_step = 0
-        while(True):
+        while(self.update_step < self.total_updates):
             
             #Collect rollout
             for step in range(self.rollout_steps):
@@ -164,7 +182,7 @@ class PPO():
 
                 #Accumulate non adjusted score
                 score += self.reward_buf[step].mean()
-                
+
                 self.global_step+=1
             
             #Calculate generalized advantage estimate, looping backwards
@@ -199,21 +217,23 @@ class PPO():
                     
             
             #End of update tasks
-            self.ac.actor_variance *= 0.99
+            self.ac.actor_variance *= self.action_lambda
             self.tb.add_scalar("Advantage", gae_buf.mean(), self.global_step)
             
             if self.update_step % self.eval_freq == 0:
                 #Calculate score per second
                 score = score/(self.time_per_update*self.eval_freq)
-                print("Timestep " + str(self.global_step) + ": Score: " + str(round(score.item())) + ", Action Variance: " + str(self.ac.actor_variance.data.mean()))
+                print("Timestep " + str(self.global_step) + ", Network updates:" + str(self.update_step) + ": Score: " + str(round(score.item(), 2)) + ", Action Variance: " + str(self.ac.actor_variance.data.mean().item()))
                     
-                self.tb.add_scalar("Score/timestep", float(score), self.global_step)
+                self.tb.add_scalar("Metric/Score", float(score), self.global_step)
                 if score > best_score:
                     print("Saving checkpoint ")
                     best_score = score
                     torch.save(self.ac.state_dict(), self.log_dir + "/best_weigth")
                 score = 0
             self.update_step += 1
+        self.vecenv.gym.destroy_sim(self.vecenv.sim)
+        del self.vecenv.gym
 
     def update_net(self, log_prob, log_prob_new, values, returns, advantage):
         #Calculate loss function for actor network
@@ -237,7 +257,3 @@ class PPO():
         self.tb.add_scalar("Loss/total", tot_loss, self.global_step)
         self.tb.add_scalar("Loss/Actor", actor_loss, self.global_step)
         self.tb.add_scalar("Loss/Critic", critic_loss, self.global_step)
-
-if __name__ == "__main__":
-    learner = PPO(env_cfg_file = "cfg/env/BallBalance.yaml", train_cfg_file = "cfg/algo/BallBalance_train.yaml")
-    learner.run()

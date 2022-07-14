@@ -23,8 +23,7 @@ def sweep_param(env_cfg_path, train_cfg_path, env_or_train, param_name, param_va
     if isinstance(param_name, list):
         for i in range(len(param_values[0])):
             for j, param in enumerate(param_name):
-                for value in param_values[j]:
-                    cfg[param] = value
+                cfg[param] = param_values[j][i]
             with open('tmp/cfg.yaml', 'w') as stream:
                 yaml.safe_dump(cfg, stream)
             run_name = '_'.join(param_name) + "_Sweep/" + '_'.join([str(f[i]) for f in param_values])
@@ -45,6 +44,6 @@ if __name__ == "__main__":
     #sweep_param(env_cfg_path, train_cfg_path, "train", "anneal_lr", [True, False], 2)
     
     sweep_param(env_cfg_path, train_cfg_path, "train", 
-    ["numEnvs", "rollout_steps", "update_steps"], 
-    [[16,32],[8,64]], 1)
+    ["numEnvs", "rollout_steps"], 
+    [[256,1024,4096],[256,64,16]], 1)
     

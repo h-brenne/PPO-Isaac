@@ -132,6 +132,8 @@ class PPO():
                                 train_cfg["action_init_var"],
                                 self.device).to(self.device)
         self.optimizer = torch.optim.Adam(self.ac.parameters(), lr=self.l_rate)
+        self.anneal_lr = train_cfg["anneal_lr"]
+        self.lr_decay = self.l_rate/self.total_updates 
 
         if(self.checkpoint):
             self.ac.load_state_dict(torch.load(checkpoint))
@@ -232,6 +234,11 @@ class PPO():
             
             #End of update tasks
             self.ac.actor_variance *= self.action_lambda
+
+            if(self.anneal_lr):
+                self.optimizer.param_groups[0]['lr'] -= self.lr_decay
+                self.tb.add_scalar("Learning Rate", self.optimizer.param_groups[0]['lr'], self.global_step)
+
             self.tb.add_scalar("Advantage", gae_buf.mean(), self.global_step)
             
             #Get mean episode reward

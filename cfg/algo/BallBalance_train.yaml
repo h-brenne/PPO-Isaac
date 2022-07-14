@@ -15,4 +15,6 @@ rollout_steps: 16
 minibatch_size: 8 #Needs to be a factor of rollout_steps
 nn_layer_connections: [400,200,100]
 
-orthonal_init: True
+orthogonal_init: True
+
+anneal_lr: False

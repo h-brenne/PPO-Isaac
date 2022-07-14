@@ -26,7 +26,7 @@ def tflog2pandas(path: str) -> pd.DataFrame:
         "scalars": 0,  # 0 means load all
         "histograms": 1,
     }
-    runlog_data = pd.DataFrame({"metric": [], "value": [], "step": []})
+    runlog_data = pd.DataFrame({"metric": [], "value": [], "step": [], "wall_time": []})
     try:
         event_acc = EventAccumulator(path, DEFAULT_SIZE_GUIDANCE)
         event_acc.Reload()
@@ -35,7 +35,8 @@ def tflog2pandas(path: str) -> pd.DataFrame:
             event_list = event_acc.Scalars(tag)
             values = list(map(lambda x: x.value, event_list))
             step = list(map(lambda x: x.step, event_list))
-            r = {"metric": [tag] * len(step), "value": values, "step": step}
+            wall_time = list(map(lambda x: x.wall_time, event_list))
+            r = {"metric": [tag] * len(step), "value": values, "step": step, "wall_time": wall_time}
             r = pd.DataFrame(r)
             runlog_data = pd.concat([runlog_data, r])
     # Dirty catch of DataLossError

@@ -15,13 +15,16 @@ sub_entries = os.scandir(sweep_path)
 for entry in sub_entries:
     if entry.is_dir():
         event_paths = glob.glob(os.path.join(sweep_path + entry.name + "/tb", "event*"))
-        df = tflogs2pandas.many_logs2pandas(event_paths)
-        df = df[df["metric"] == "Score/episode_reward"]
-        #print(df.head())
+        df_group = pd.DataFrame()
+        for path in event_paths:
+            df = tflogs2pandas.tflog2pandas(path)
+            df["wall_time"] -= df["wall_time"].iat[0]
+            if df_group.shape[0] == 0:
+                df_group = df
+            else:
+                df_group = df_group.append(df, ignore_index=True)
+        df_group = df_group[df_group["metric"] == "Score/episode_reward"]
         label = entry.name
-        #print(df["wall_time"].iat[0])
-        #df["wall_time"] -= df["wall_time"].iat[0]
-        sns.lineplot(data=df, x="wall_time", y="value", label=label)
-#plt.legend(labels=["Default init","", "Orthogonal init"])
+        sns.lineplot(data=df_group, x="wall_time", y="value", label=label)
 plt.title("Orthogonal initialization")
 plt.show()

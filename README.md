@@ -3,7 +3,7 @@
 PPO implementation for Isaac Gym. The goal of this implementation is to have a contained file for the PPO implementation such that algorithmic experimentation can be easier done. Tested on Preview 3 and Preview 4. 
 
 ## Installation
-Install Isaac Gym Preview. Install [IsaacGymEnvs](https://github.com/NVIDIA-Omniverse/IsaacGymEnvs). **Important:** Use torch 1.12. With torch 1.8, sampling from a multivariate normal distribution with GPU tensors is extremely slow, and will hog most of the compute time If you setup a conda environment with the supplied script in Isaac Gym, you will get torch 1.8.
+Install Isaac Gym Preview. Install [IsaacGymEnvs](https://github.com/NVIDIA-Omniverse/IsaacGymEnvs). **Important:** Use torch 1.12. With torch 1.8, sampling from a multivariate normal distribution with GPU tensors is extremely slow, and will hog most of the compute time. If you setup a conda environment with the supplied script in Isaac Gym, you will get torch 1.8.
 
 ## Usage
 Use 'python train.py', which takes the following arguments: 'env_cfg_path, train_cfg_path, run_name, checkpoint_path'

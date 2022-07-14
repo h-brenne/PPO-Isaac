@@ -16,6 +16,8 @@ import numpy as np
 #from tasks.cartpole import Cartpole
 from isaacgymenvs.tasks import isaacgym_task_map
 
+def scale_rewards(rewards, running_stats)
+
 def orthogonal_init(layer):
     if isinstance(layer, nn.Linear):
         nn.init.orthogonal_(layer.weight)
@@ -57,7 +59,6 @@ def select_action_multinormaldist(mean, variance):
     covariance_matrix = torch.diag(variance)
     prob_dist = torch.distributions.MultivariateNormal(mean, covariance_matrix)
     action = prob_dist.sample()
-
     return action, prob_dist
 
 class PPO():
@@ -159,11 +160,12 @@ class PPO():
         reward_sum_buf = torch.zeros((self.num_envs), device = self.device, dtype=torch.float)
         reward_sum = 0
         episode_reward_sum = 0
-        mean_ep_reward = 0
+        mean_ep_reward = torch.zeros(1)
         finished_episodes = 0
         best_score = 0
         self.global_step = 0
         self.update_step = 0
+
         while(self.update_step < self.total_updates):
             
             #Collect rollout
@@ -192,9 +194,11 @@ class PPO():
                 if len(r_finished) > 0:
                     episode_reward_sum += r_finished.sum()
                 reward_sum_buf *= 1-next_reset
-
+                
+                #TODO: Normalize reward
+                
                 self.global_step+=1
-            
+
             #Calculate generalized advantage estimate, looping backwards
             with torch.no_grad():
                 self.value_buf[self.rollout_steps] = self.ac.critic(self.next_obs_buf).squeeze()

@@ -1,4 +1,4 @@
-total_updates: 100 # Training ending condition
+total_updates: 500 # Training ending condition
 
 learning_rate: 3.0e-4
 gamma: 0.99

@@ -9,7 +9,7 @@ import dependencies.tflogs2pandas as tflogs2pandas
 
 sns.set_theme(style="darkgrid")
 
-sweep_path = "runs/BallBalance/anneal_lr_Sweep/"
+sweep_path = "runs/Humanoid/anneal_lr_Sweep/"
 sub_entries = os.scandir(sweep_path)
 
 for entry in sub_entries:
@@ -25,6 +25,6 @@ for entry in sub_entries:
                 df_group = df_group.append(df, ignore_index=True)
         df_group = df_group[df_group["metric"] == "Score/episode_reward"]
         label = entry.name
-        sns.lineplot(data=df_group, x="wall_time", y="value", label=label)
+        sns.lineplot(data=df_group, x="step", y="value", label=label)
 plt.title("Orthogonal initialization")
 plt.show()

@@ -119,12 +119,12 @@ class PPO():
         self.gamma = train_cfg["gamma"] #Reward discount factor
         self.lambda_ = train_cfg["lambda"] #GAE tuner
         self.epsilon = train_cfg["epsilon_clip"] #Clip epsilon
+        self.critic_scale = train_cfg["critic_scale"]
 
         self.eval_freq = train_cfg["eval_freq"]
         
         self.time_per_update = env_cfg["sim"]["dt"]*self.rollout_steps #rollout Sim time before each NN update
 
-        self.action_lambda = train_cfg["action_lambda"]
         self.action_var_decay = train_cfg["action_init_var"]/self.total_updates
         self.ac = ActorCritic(  train_cfg["nn_layer_connections"], 
                                 self.num_obs, self.num_actions, 
@@ -200,7 +200,7 @@ class PPO():
                 
                 #TODO: Normalize reward
                 
-                self.global_step+=1
+                self.global_step += self.num_envs
 
             #Calculate generalized advantage estimate, looping backwards
             with torch.no_grad():
@@ -272,8 +272,7 @@ class PPO():
         actor_loss = -torch.min(l1, l2).mean()
         
         #Critic loss
-        critic_scale = 0.5
-        critic_loss = critic_scale*torch.pow(values-returns,2).mean()
+        critic_loss = self.critic_scale*torch.pow(values-returns,2).mean()
 
         tot_loss = actor_loss + critic_loss
         

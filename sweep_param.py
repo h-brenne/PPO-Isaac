@@ -32,5 +32,5 @@ if __name__ == "__main__":
     env_cfg_path = "cfg/env/BallBalance.yaml"
     train_cfg_path = "cfg/algo/BallBalance_train.yaml"
     
-    sweep_param(env_cfg_path, train_cfg_path, "train", "rollout_steps", [4, 16, 64], 2)
+    sweep_param(env_cfg_path, train_cfg_path, "train", "orthogonal_init", [False, True], 2)
     #run_batch(env_cfg_path, train_cfg_path)

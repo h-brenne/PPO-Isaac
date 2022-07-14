@@ -16,13 +16,10 @@ import numpy as np
 #from tasks.cartpole import Cartpole
 from isaacgymenvs.tasks import isaacgym_task_map
 
-def scale_rewards(rewards, running_stats)
-
 def orthogonal_init(layer):
     if isinstance(layer, nn.Linear):
-        nn.init.orthogonal_(layer.weight)
-        #layer.bias.data.fill_(0.0)
-    
+        nn.init.orthogonal_(layer.weight, gain=np.sqrt(2))
+        nn.init.zeros_(layer.bias)
 class ActorCritic(nn.Module):
 
     def __init__(self, layer_array, n_obs, n_actions, orthogonal, init_variance, device):
@@ -39,6 +36,10 @@ class ActorCritic(nn.Module):
         if orthogonal:
             self.actor.apply(orthogonal_init)
             self.critic.apply(orthogonal_init)
+
+            #Scale last layer of policy
+            self.actor[-1].weight.data.copy_(0.01 * self.actor[-1].weight.data)
+            nn.init.zeros_(self.actor[-1].bias)
 
     def create_net(self, layer_array, input_size, output_size):
         layers = []
@@ -127,7 +128,7 @@ class PPO():
         self.action_lambda = train_cfg["action_lambda"]
         self.ac = ActorCritic(  train_cfg["nn_layer_connections"], 
                                 self.num_obs, self.num_actions, 
-                                train_cfg["orthonal_init"], 
+                                train_cfg["orthogonal_init"], 
                                 train_cfg["action_init_var"],
                                 self.device).to(self.device)
         self.optimizer = torch.optim.Adam(self.ac.parameters(), lr=self.l_rate)

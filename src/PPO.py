@@ -94,7 +94,6 @@ class PPO():
         #Setup sim
         env_cfg["env"]["numEnvs"] = train_cfg["numEnvs"]
 
-        print("test")
         self.vecenv = isaacgym_task_map[env_cfg["name"]](   env_cfg, 
                                                             env_cfg["rl_device"], 
                                                             env_cfg["sim_device"], 
@@ -126,6 +125,7 @@ class PPO():
         self.time_per_update = env_cfg["sim"]["dt"]*self.rollout_steps #rollout Sim time before each NN update
 
         self.action_lambda = train_cfg["action_lambda"]
+        self.action_var_decay = train_cfg["action_init_var"]/self.total_updates
         self.ac = ActorCritic(  train_cfg["nn_layer_connections"], 
                                 self.num_obs, self.num_actions, 
                                 train_cfg["orthogonal_init"], 
@@ -233,11 +233,11 @@ class PPO():
                     
             
             #End of update tasks
-            self.ac.actor_variance *= self.action_lambda
-
+            self.ac.actor_variance -= self.action_var_decay
+            self.tb.add_scalar("Hyperparam/actor_variance", self.ac.actor_variance.mean(), self.global_step)
             if(self.anneal_lr):
                 self.optimizer.param_groups[0]['lr'] -= self.lr_decay
-                self.tb.add_scalar("Learning Rate", self.optimizer.param_groups[0]['lr'], self.global_step)
+                self.tb.add_scalar("Hyperparam/lr", self.optimizer.param_groups[0]['lr'], self.global_step)
 
             self.tb.add_scalar("Advantage", gae_buf.mean(), self.global_step)
             

@@ -9,7 +9,7 @@ sim_device: 'cuda:0'
 rl_device: 'cuda:0'
 graphics_device_id: 0
 force_render: True
-headless: False
+headless: True
 
 env: 
   envSpacing: 5

@@ -9,10 +9,9 @@ sim_device: 'cuda:0'
 rl_device: 'cuda:0'
 graphics_device_id: 0
 force_render: True
-headless: False
+headless: True
+
 env: 
-#  numEnvs: ${...num_envs}
-  numEnvs: 4096
   envSpacing: 5
   episodeLength: 1000
   enableDebugVis: False

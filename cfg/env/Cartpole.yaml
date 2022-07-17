@@ -13,7 +13,6 @@ headless: False
 
 
 env:
-  numEnvs: 512
   envSpacing: 2.0
   resetDist: 3.0
   maxEffort: 400.0

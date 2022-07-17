@@ -12,7 +12,6 @@ force_render: True
 headless: True
 
 env:
-  numEnvs: 0
   envSpacing: 2.0
 
   maxEpisodeLength: 500

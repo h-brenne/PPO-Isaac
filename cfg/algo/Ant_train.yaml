@@ -1,20 +1,21 @@
-total_updates: 600 # Training ending condition
+total_updates: 150 # Training ending condition
 
 learning_rate: 3.0e-4
 gamma: 0.99
 lambda: 0.95 #tuning GAE
 epsilon_clip: 0.2
 num_epoch: 5
+critic_scale: 0.05
+
 eval_freq: 2
+checkpoint_freq: 20
 
-action_init_var: 0.5
-action_lambda: 0.999
+action_init_var: 0.4
 
-numEnvs: 4096
-rollout_steps: 16
-minibatch_size: 16 #Needs to be a factor of rollout_steps
+numEnvs: 2048
+rollout_steps: 128
+minibatch_size: 4 #Needs to be a factor of rollout_steps
 nn_layer_connections: [256,128,64]
 
 orthogonal_init: True
-
 anneal_lr: True

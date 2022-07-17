@@ -122,6 +122,7 @@ class PPO():
         self.critic_scale = train_cfg["critic_scale"]
 
         self.eval_freq = train_cfg["eval_freq"]
+        self.checkpoint_freq = train_cfg["checkpoint_freq"]
         
         self.time_per_update = env_cfg["sim"]["dt"]*self.rollout_steps #rollout Sim time before each NN update
 
@@ -196,7 +197,7 @@ class PPO():
                 finished_episodes += len(r_finished)
                 if len(r_finished) > 0:
                     episode_reward_sum += r_finished.sum()
-                reward_sum_buf *= 1-next_reset
+                reward_sum_buf *= torch.logical_not(next_reset)
                 
                 #TODO: Normalize reward
                 
@@ -258,9 +259,12 @@ class PPO():
                 print(  "Timestep " + str(self.global_step) + ", Network updates:" + str(self.update_step) + ": Score: " + 
                         str(round(score.item(), 2)) + ", Action Variance: " + str(round(self.ac.actor_variance.data.mean().item(), 2)))
                 if score > best_score:
-                    print("Saving checkpoint ")
+                    print("Saving best weights ")
                     best_score = score
-                    torch.save(self.ac.state_dict(), self.log_dir + "/" + self.now + "_best_weigth")
+                    torch.save(self.ac.state_dict(), self.log_dir + "/" + "best_weigths")
+            if self.update_step % self.checkpoint_freq == 0:
+                torch.save( self.ac.state_dict(), self.log_dir + "/timestep_" + 
+                            str(self.global_step) + "_score_" + str(round(score.item(), 2)) + "_weights")
             self.update_step += 1
 
     def update_net(self, log_prob, log_prob_new, values, returns, advantage):

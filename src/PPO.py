@@ -30,8 +30,6 @@ class ActorCritic(nn.Module):
         super(ActorCritic, self).__init__()
         # Outputs mean value of action
         self.actor = nn.Sequential(*self.create_net(layer_array, n_obs, n_actions))
-
-        # We want the variance elements to be trainable, assuming no cross correlation
         self.actor_variance = torch.full((n_actions,), init_variance, device=device)
 
         # Outputs value function

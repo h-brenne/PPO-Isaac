@@ -26,15 +26,20 @@ https://user-images.githubusercontent.com/12870693/181915045-89b78919-79af-446f-
 https://user-images.githubusercontent.com/12870693/181914889-5eb56265-da9a-4222-bc60-08767521e75d.mp4
 
 ![HuimanoidVS](https://user-images.githubusercontent.com/12870693/181915839-5318c057-7d9f-4fd5-8098-0075f55c28e3.png)
+![Humanoid_anneal_LR](https://user-images.githubusercontent.com/12870693/209554224-257592cf-7b66-4556-b88b-9bd3706eacfc.png)
+![HumanoidOrtho](https://user-images.githubusercontent.com/12870693/209554226-ffbc8337-8a4c-4c2d-afa7-2fc21148fab5.png)
 
 ### Ant
 https://user-images.githubusercontent.com/12870693/181914888-3abd64a7-a409-46b4-bd1a-a048a2ad32ad.mp4
 
 ![AntVS](https://user-images.githubusercontent.com/12870693/181915841-786db676-acd5-46a6-ae52-ccc9b1e024eb.png)
+![Ant_Anneal_LR](https://user-images.githubusercontent.com/12870693/209554235-7bc95db4-2ea9-48f6-ba64-01d77a636372.png)
+![AntOrtho](https://user-images.githubusercontent.com/12870693/209554236-700a0420-3406-4c82-acac-79c16ce5d175.png)
 
 ### BallBalance
 https://user-images.githubusercontent.com/12870693/181914868-2e00f062-0319-4031-aa65-af3540394d04.mp4
 
 ![BallBalanceVS](https://user-images.githubusercontent.com/12870693/181915844-61b65de5-e841-48bd-b710-e831876226ac.png)
-
+![BallBalanceOrtho](https://user-images.githubusercontent.com/12870693/209554287-5d4299e9-089d-4b18-a5c7-c6798d429d74.png)
+![BallBalanceLR](https://user-images.githubusercontent.com/12870693/209554290-430ab79e-d131-48eb-bd6e-8aa1d2fbcf10.png)
 
